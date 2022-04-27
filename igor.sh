@@ -7,7 +7,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 warning_header=$(tput setab 227 setaf 0 bold)
 warning_text=$(tput setaf 227 setab 0 bold)
 inform_header=$(tput setab 20 setaf 254 bold)
-inform_text=$(tput setaf 20 setab 254 bold)
+inform_text=$(tput setaf 243 setab 0 bold)
 yell_header=$(tput setab 160 setaf 226 bold)
 yell_text=$(tput setaf 160 setab 0 bold)
 result_header=$(tput setab 118 setaf 0 bold)
@@ -34,7 +34,7 @@ warn() {
   printf "%s" "$separator"
   printf "\n%s\xC2\xA0Igor\xC2\xA0%s%s Master, I have an important message!\e[K%s\n" "${warning_header}" "${normal}" "${warning_text}" "${normal}"
   printf "%s\e[K" "$message_text"
-  printf "\n%s\n\n" "$text"
+  printf "\n%b\e[K\n\n" "$text"
   printf "%s" "$separator"
   printf "%s\n\n" "${normal}"
 }
@@ -45,7 +45,7 @@ inform() {
   printf "%s" "$separator"
   printf "\n%s\xC2\xA0Igor\xC2\xA0%s%s Master, this might interest you:\e[K%s\n" "${inform_header}" "${normal}" "${inform_text}" "${normal}"
   printf "%s\e[K" "$message_text"
-  printf "%s\n" "$text"
+  printf "\n%b\e[K\n\n" "$text"
   printf "%s" "$separator"
   printf "%s\n\n" "${normal}"
 }
@@ -56,7 +56,7 @@ yell() {
   printf "%s" "$separator"
   printf "\n%s\xC2\xA0Igor\xC2\xA0%s%s Master, attention!\e[K%s\n" "${yell_header}" "${normal}" "${yell_text}" "${normal}"
   printf "%s\e[K" "$message_text"
-  printf "%s\n" "$text"
+  printf "\n%b\e[K\n\n" "$text"
   printf "%s" "$separator"
   printf "%s\n\n" "${normal}"
 }
@@ -67,7 +67,7 @@ result() {
   printf "%s" "$separator"
   printf "\n%s\xC2\xA0Igor\xC2\xA0%s%s Master, here are the results:\e[K%s\n" "${result_header}" "${normal}" "${result_text}" "${normal}"
   printf "%s\e[K" "$message_text"
-  printf "%s\n" "$text"
+  printf "\n%b\e[K\n\n" "$text"
   printf "%s" "$separator"
   printf "%s\n\n" "${normal}"
 }
@@ -103,8 +103,9 @@ add_file() {
     yell "$param seems to already be a symbolic link. I don't want to do this."
     exit 1
   }
-  mv "$PWD/$param" "$script_dir"
-  ln -s "$script_dir/$param" "$PWD/$param"
+  # mv "$PWD/$param" "$script_dir"
+  # ln -s "$script_dir/$param" "$PWD/$param"
+  echo "$param=$PWD" >>"$script_dir/tracked-files"
   ls -la "$PWD/$param"
   exit 0
 }
@@ -126,6 +127,10 @@ remove_file() {
   mv "$script_dir/$param" "$PWD"
   ls -la "$PWD/$param"
   exit 0
+}
+
+print_folder() {
+  inform "Current folder: $PWD\nScript folder: $script_dir"
 }
 
 parse_params() {
@@ -156,6 +161,11 @@ parse_params() {
       param="${2-}"
       shift
       remove_file
+      ;;
+    "--print-folder")
+      shift
+      print_folder
+      exit 0
       ;;
     -?*)
       warn "I don't understand the option: $1"
