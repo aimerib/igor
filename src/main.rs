@@ -13,7 +13,6 @@ use anyhow::{Context, Ok, Result};
 use std::io::Write;
 use symlink::{remove_symlink_file, symlink_file};
 extern crate text_io;
-// use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
@@ -50,10 +49,13 @@ struct Igor {
 }
 
 impl Igor {
+    fn igor_project_config() -> ProjectDirs {
+        ProjectDirs::from("com", "Slothcrew", "Igor")
+            .context("Could not find config file")
+            .unwrap()
+    }
     fn new() -> Result<Self> {
-        let project_dir =
-            ProjectDirs::from("com", "Slothcrew", "Igor").context("Could not find config file")?;
-        let config_folder = project_dir.config_dir();
+        let config_folder = Igor::igor_project_config().config_dir().to_path_buf();
         // check that .dotfiles folder exists or create it in the home directory
         if !&config_folder.exists() {
             std::fs::create_dir_all(&config_folder)
@@ -63,15 +65,14 @@ impl Igor {
         // if file doesn't exist, create it
         let mut config = Config::new()?;
         if !config_path.exists() {
-            config.save_to_file(&config_path)?;
+            config.save_to_file()?;
         } else {
-            config = Config::load_from_file(&config_path)?;
+            config = Config::load_from_config_file()?;
         }
 
         let args = Rc::new(RefCell::new(IgorArgs::parse()));
         let path = env::current_dir().context("Failed to read current directory.")?;
 
-        // let config = Config {};
         Ok(Igor {
             args,
             config,
@@ -89,12 +90,11 @@ impl Igor {
             None => path.join(".dotfiles"),
         };
         // We use the crate directories to generate OS compliant paths
-        // for Igor config files. On *nix systems, this is the ~/.config/appname
-        // folder. On Windows, this is the %APPDATA%/Company/Appname folder.
+        // for Igor config files.
+        // On *nix systems, this is the ~/.config/appname folder.
+        // On Windows, this is the %APPDATA%/Company/Appname folder.
         // On macOS, this is the ~/Library/Preferences/com.Company.Appname folder.
-        let project_dir =
-            ProjectDirs::from("com", "Slothcrew", "Igor").context("Could not find config file")?;
-        let config_folder = project_dir.config_dir();
+        let config_folder = Igor::igor_project_config().config_dir().to_path_buf();
         // check that .dotfiles folder exists or create it in the path
         if !&full_dotfile_path.exists() {
             std::fs::create_dir_all(&full_dotfile_path)
@@ -123,12 +123,6 @@ impl Igor {
                 // It's a symlink, so ask the user if we can replace it.
                 let user_answer: String = input()
                     .err_match(with_display)
-                    // .add_test(|x| {
-                    //     matches!(
-                    //         x.as_str(),
-                    //         "y" | "Y" | "yes" | "Yes" | "YES" | "n" | "N" | "no" | "No" | "NO"
-                    //     )
-                    // })
                     .repeat_msg("Symlink for .igorrc.yml exists. Replace it? (y/n) ")
                     .get();
                 // Do the dirty
@@ -172,42 +166,66 @@ impl Igor {
             }
         } else {
             if !config_path.exists() {
-                Config::new()?.save_to_file(&config_path)?;
+                Config::new()?.save_to_file()?;
             }
             symlink_file(&config_path, &symlink_config_path).context("Failed to create symlink")?;
         }
-        dbg!(config_path);
-        dbg!(symlink_config_path);
+
         Ok(())
     }
 }
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(default)]
-struct Config {}
+struct Config {
+    tracked_files: Vec<TrackedFile>,
+}
 impl Config {
-    fn load_from_file(path: &Path) -> Result<Self> {
+    fn load_from_config_file() -> Result<Self> {
+        let config_folder = Igor::igor_project_config().config_dir().to_path_buf();
+        let config_file_path = config_folder.join("igorrc.yml");
         // try to read config file into Config struct
-        let config_file = std::fs::File::open(path).context("Failed to open config file.")?;
+        let config_file =
+            std::fs::File::open(config_file_path).context("Failed to open config file.")?;
         let config: Config =
             serde_yaml::from_reader(config_file).context("Failed to parse config file.")?;
         Ok(config)
     }
     // creates a new default config file
     fn new() -> Result<Self> {
-        let config = Self::default();
+        let config = Config {
+            tracked_files: vec![],
+        };
         Ok(config)
     }
-    fn save_to_file(&self, path: &Path) -> Result<()> {
+    fn save_to_file(&self) -> Result<()> {
+        let config_folder = Igor::igor_project_config().config_dir().to_path_buf();
+        let config_file_path = config_folder.join("igorrc.yml");
         // try to write config file from Config struct
-        let config_file = std::fs::File::create(path).context("Failed to create config file.")?;
+        let config_file =
+            std::fs::File::create(config_file_path).context("Failed to create config file.")?;
         serde_yaml::to_writer(config_file, self).context("Failed to write config file.")?;
+        Ok(())
+    }
+    fn track_file(&mut self, file_name: &Path) -> Result<()> {
+        // To get the full path of the file we combine the file name with the current directory
+        // stored in the Igor struct.
+        let tracked_file = TrackedFile {
+            path: file_name.to_path_buf(),
+            name: file_name.file_name().unwrap().to_str().unwrap().to_string(),
+            folder: file_name.is_dir(),
+        };
+        println!("{:#?}", tracked_file);
+        self.tracked_files.push(tracked_file);
+        self.save_to_file()?;
+        // check that file exists in the filesystem
+        println!("{:?}", self);
         Ok(())
     }
 }
 
 fn main() -> Result<()> {
-    let igor = Igor::new()?;
-    if igor.args.borrow().show_config_path {
+    let mut igor = Igor::new()?;
+    if igor.args.borrow_mut().show_config_path {
         // User might want to pipe this information for example to a file
         // so we must make sure that this is printed to stdout
         // https://github.com/rust-lang/rust/issues/46016
@@ -216,7 +234,9 @@ fn main() -> Result<()> {
     }
     if let Some(command) = &igor.args.borrow().command {
         match command {
-            IgorCommands::Add { file_name } => track_file(&igor, file_name)?,
+            IgorCommands::Add { file_name } => {
+                igor.config.track_file(&igor.path.join(file_name))?
+            }
             IgorCommands::Init { path, name } => {
                 let path = match path {
                     Some(path) => PathBuf::from(path),
@@ -228,26 +248,10 @@ fn main() -> Result<()> {
             }
         }
     }
-    // match &igor.args.borrow().command {
-    //     IgorCommands::Add { file_name } => track_file(&igor, file_name)?,
-    // };
-    // dbg!(igor.args);
-    // dbg!(igor.config);
-    // dbg!(igor.path);
-    // dbg!(igor.config_file);
     Ok(())
 }
 
-fn track_file(igor: &Igor, file_name: &Path) -> Result<()> {
-    // To get the full path of the file we combine the file name with the current directory
-    // stored in the Igor struct.
-    let full_path = igor.path.join(file_name);
-    // check that file exists in the filesystem
-
-    println!("{}", full_path.display());
-    Ok(())
-}
-
+#[derive(Debug, Serialize, Deserialize)]
 struct TrackedFile {
     path: PathBuf,
     name: String,
